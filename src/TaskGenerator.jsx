@@ -1,6 +1,6 @@
-/* eslint-disable react/prop-types */
 import { useState, useEffect } from "react";
 import { Check, Clock, SkipForward } from "lucide-react";
+import Cookies from "js-cookie";
 
 // Helper to track command usage and suggest tasks
 const analyzeCommandUsage = (history, allCommands) => {
@@ -29,11 +29,38 @@ const getAllCommands = (tasks) => {
   return Array.from(commands);
 };
 
-// Generate practice task based on command usage
-const generatePracticeTasks = (commandUsage, currentLevel, tasks) => {
+// Get completed tasks from cookies
+const getCompletedTasksFromCookies = () => {
+  try {
+    const completedTasksCookie = Cookies.get("completedTasks");
+    return completedTasksCookie
+      ? new Set(JSON.parse(completedTasksCookie))
+      : new Set();
+  } catch (e) {
+    return new Set();
+  }
+};
+
+// Save completed tasks to cookies using js-cookie
+const saveCompletedTasksToCookies = (completedTasks) => {
+  Cookies.set("completedTasks", JSON.stringify(Array.from(completedTasks)), {
+    expires: 30,
+  });
+};
+
+// Generate practice task based on command usage and exclude completed tasks
+const generatePracticeTasks = (
+  commandUsage,
+  currentLevel,
+  tasks,
+  completedTasks,
+) => {
   const availableTasks = Object.entries(tasks)
-    .filter(([, task]) => task.level <= currentLevel)
+    .filter(
+      ([cmd, task]) => task.level <= currentLevel && !completedTasks.has(cmd),
+    )
     .map(([cmd, task]) => ({
+      id: cmd,
       title: `Master ${cmd}`,
       description: task.description,
       expectedCommands: task.expectedCommands,
@@ -68,6 +95,9 @@ const TaskGenerator = ({
   const [lastActivityTimestamp, setLastActivityTimestamp] = useState(
     Date.now(),
   );
+  const [completedTasks, setCompletedTasks] = useState(() =>
+    getCompletedTasksFromCookies(),
+  );
   const [isLearning, setIsLearning] = useState(() => {
     const storedValue = localStorage.getItem("isLearning");
     return storedValue !== null ? JSON.parse(storedValue) : true;
@@ -78,7 +108,12 @@ const TaskGenerator = ({
     if (tasks) {
       const allCommands = getAllCommands(tasks);
       const usage = analyzeCommandUsage(commandHistory, allCommands);
-      const newTasks = generatePracticeTasks(usage, currentLevel, tasks);
+      const newTasks = generatePracticeTasks(
+        usage,
+        currentLevel,
+        tasks,
+        completedTasks,
+      );
 
       if (taskQueue.length === 0 || taskQueue[0].level >= currentLevel) {
         setTaskQueue(newTasks);
@@ -92,7 +127,7 @@ const TaskGenerator = ({
         setCompletedCommands(new Set());
       }
     }
-  }, [currentLevel, commandHistory, tasks]);
+  }, [currentLevel, commandHistory, tasks, completedTasks]);
 
   // Reset task timeout on activity
   useEffect(() => {
@@ -108,7 +143,12 @@ const TaskGenerator = ({
         // 5 minutes timeout
         const allCommands = getAllCommands(tasks);
         const usage = analyzeCommandUsage(commandHistory, allCommands);
-        const newTasks = generatePracticeTasks(usage, currentLevel, tasks);
+        const newTasks = generatePracticeTasks(
+          usage,
+          currentLevel,
+          tasks,
+          completedTasks,
+        );
         setTaskQueue(newTasks);
         setCurrentTask(newTasks.length > 0 ? newTasks[0] : null);
         setCompletedCommands(new Set());
@@ -116,7 +156,14 @@ const TaskGenerator = ({
     }, 60000); // Check every minute
 
     return () => clearInterval(timeoutCheck);
-  }, [currentTask, lastActivityTimestamp, commandHistory, currentLevel, tasks]);
+  }, [
+    currentTask,
+    lastActivityTimestamp,
+    commandHistory,
+    currentLevel,
+    tasks,
+    completedTasks,
+  ]);
 
   // Check command completion
   useEffect(() => {
@@ -135,6 +182,12 @@ const TaskGenerator = ({
 
         // Check if task is complete
         if (newCompletedCommands.size === currentTask.expectedCommands.length) {
+          // Add task to completed tasks and save to cookies
+          const newCompletedTasks = new Set(completedTasks);
+          newCompletedTasks.add(currentTask.id);
+          setCompletedTasks(newCompletedTasks);
+          saveCompletedTasksToCookies(newCompletedTasks);
+
           setTaskHistory([...taskHistory, { ...currentTask, completed: true }]);
           onTaskComplete?.(currentTask);
 
@@ -151,6 +204,7 @@ const TaskGenerator = ({
                 usage,
                 currentLevel,
                 tasks,
+                newCompletedTasks,
               );
               setTaskQueue(newTasks);
               setCurrentTask(newTasks.length > 0 ? newTasks[0] : null);
@@ -175,11 +229,18 @@ const TaskGenerator = ({
     taskHistory,
     tasks,
     terminalInput,
+    completedTasks,
   ]);
+
   const handleSkipTask = () => {
     if (!currentTask) return;
 
-    // Mark task as skipped (but still completed)
+    // Mark task as skipped and add to completed tasks
+    const newCompletedTasks = new Set(completedTasks);
+    newCompletedTasks.add(currentTask.id);
+    setCompletedTasks(newCompletedTasks);
+    saveCompletedTasksToCookies(newCompletedTasks);
+
     setTaskHistory([
       ...taskHistory,
       { ...currentTask, completed: true, skipped: true },
@@ -197,7 +258,12 @@ const TaskGenerator = ({
       setTimeout(() => {
         const allCommands = getAllCommands(tasks);
         const usage = analyzeCommandUsage(commandHistory, allCommands);
-        const newTasks = generatePracticeTasks(usage, currentLevel, tasks);
+        const newTasks = generatePracticeTasks(
+          usage,
+          currentLevel,
+          tasks,
+          newCompletedTasks,
+        );
 
         setTaskQueue(newTasks);
         setCurrentTask(newTasks.length > 0 ? newTasks[0] : null);
@@ -206,6 +272,7 @@ const TaskGenerator = ({
       }, 1500);
     }
   };
+
   if (!currentTask) return null;
 
   return (
@@ -251,7 +318,6 @@ const TaskGenerator = ({
           </div>
         </div>
 
-        {/* Skip Task Button */}
         <button
           onClick={handleSkipTask}
           className="mt-4 flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
