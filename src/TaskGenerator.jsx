@@ -130,7 +130,7 @@ const TaskGenerator = ({
           expectedCommands: taskInfo?.expectedCommands || [],
           level: taskInfo?.level || 1,
           completed: true,
-          completedAt: new Date().toISOString(), // Add completion timestamp
+          completedAt: new Date().toISOString(),
         };
       });
       setTaskHistory(initialHistory);
