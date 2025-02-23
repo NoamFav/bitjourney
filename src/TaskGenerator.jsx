@@ -48,6 +48,20 @@ const saveCompletedTasksToCookies = (completedTasks) => {
   });
 };
 
+const getTaskHistoryFromStorage = () => {
+  try {
+    const storedHistory = localStorage.getItem("taskHistory");
+    return storedHistory ? JSON.parse(storedHistory) : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+// New helper function to save task history to localStorage
+const saveTaskHistoryToStorage = (history) => {
+  localStorage.setItem("taskHistory", JSON.stringify(history));
+};
+
 // Generate practice task based on command usage and exclude completed tasks
 const generatePracticeTasks = (
   commandUsage,
@@ -90,7 +104,10 @@ const TaskGenerator = ({
   const [taskQueue, setTaskQueue] = useState([]);
   const [currentTask, setCurrentTask] = useState(null);
   const [completedCommands, setCompletedCommands] = useState(new Set());
-  const [taskHistory, setTaskHistory] = useState([]);
+  const [taskHistory, setTaskHistory] = useState(() =>
+    getTaskHistoryFromStorage(),
+  );
+
   const [isGeneratingPractice, setIsGeneratingPractice] = useState(false);
   const [lastActivityTimestamp, setLastActivityTimestamp] = useState(
     Date.now(),
@@ -102,7 +119,23 @@ const TaskGenerator = ({
     const storedValue = localStorage.getItem("isLearning");
     return storedValue !== null ? JSON.parse(storedValue) : true;
   });
-
+  useEffect(() => {
+    if (taskHistory.length === 0 && completedTasks.size > 0) {
+      const initialHistory = Array.from(completedTasks).map((taskId) => {
+        const taskInfo = tasks[taskId];
+        return {
+          id: taskId,
+          title: `Master ${taskId}`,
+          description: taskInfo?.description || "",
+          expectedCommands: taskInfo?.expectedCommands || [],
+          level: taskInfo?.level || 1,
+          completed: true,
+          completedAt: new Date().toISOString(), // Add completion timestamp
+        };
+      });
+      setTaskHistory(initialHistory);
+    }
+  }, [completedTasks, tasks]);
   // Initialize or update task queue
   useEffect(() => {
     if (tasks) {
@@ -188,8 +221,13 @@ const TaskGenerator = ({
           setCompletedTasks(newCompletedTasks);
           saveCompletedTasksToCookies(newCompletedTasks);
 
-          setTaskHistory([...taskHistory, { ...currentTask, completed: true }]);
-          onTaskComplete?.(currentTask);
+          const completedTask = {
+            ...currentTask,
+            completed: true,
+            completedAt: new Date().toISOString(),
+          };
+          setTaskHistory([...taskHistory, completedTask]);
+          onTaskComplete?.(completedTask);
 
           // Remove completed task and move to next one
           const updatedQueue = taskQueue.slice(1);
@@ -235,16 +273,18 @@ const TaskGenerator = ({
   const handleSkipTask = () => {
     if (!currentTask) return;
 
-    // Mark task as skipped and add to completed tasks
     const newCompletedTasks = new Set(completedTasks);
     newCompletedTasks.add(currentTask.id);
     setCompletedTasks(newCompletedTasks);
     saveCompletedTasksToCookies(newCompletedTasks);
 
-    setTaskHistory([
-      ...taskHistory,
-      { ...currentTask, completed: true, skipped: true },
-    ]);
+    const skippedTask = {
+      ...currentTask,
+      completed: true,
+      skipped: true,
+      completedAt: new Date().toISOString(),
+    };
+    setTaskHistory([...taskHistory, skippedTask]);
 
     // Move to the next task in the queue
     const updatedQueue = taskQueue.slice(1);
@@ -275,17 +315,24 @@ const TaskGenerator = ({
 
   if (!currentTask) return null;
 
+  const formatTime = (isoString) => {
+    return new Date(isoString).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold text-cyan-400">Current Task</h3>
-
       {isGeneratingPractice && (
         <div className="flex items-center space-x-2 text-cyan-400">
           <Clock className="h-5 w-5 animate-spin" />
           <span>Generating tasks...</span>
         </div>
       )}
-
       <div className="border border-gray-700 p-4 rounded-md space-y-2">
         <div className="flex items-center justify-between">
           <h4 className="text-md font-semibold text-cyan-300">
@@ -326,7 +373,6 @@ const TaskGenerator = ({
           Skip Task
         </button>
       </div>
-
       {taskHistory.length > 0 && (
         <div className="mt-6 pt-4 border-t border-gray-700">
           <h4 className="text-sm font-medium text-gray-400 mb-2">
@@ -339,12 +385,18 @@ const TaskGenerator = ({
                 className="text-sm text-gray-500 flex items-center gap-2"
               >
                 <Check className="h-4 w-4 text-green-500" />
-                {task.title}
+                <span>{task.title}</span>
+                <span className="text-xs text-gray-600">
+                  {formatTime(task.completedAt)}
+                </span>
+                {task.skipped && (
+                  <span className="text-xs text-orange-500">(Skipped)</span>
+                )}
               </div>
             ))}
           </div>
         </div>
-      )}
+      )}{" "}
     </div>
   );
 };
